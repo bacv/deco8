@@ -10,7 +10,7 @@ fn next_pow2(n: usize) -> usize {
     n + 1
 }
 
-fn shortest_be_bytes(d: usize) -> Vec<u8> {
+fn short_be_bytes(d: usize) -> Vec<u8> {
     let mut np2 = next_pow2(d);
     let mut exp = 1; // exponent
 
@@ -49,19 +49,29 @@ fn shortest_be_bytes(d: usize) -> Vec<u8> {
     res
 }
 
-fn find_repeat_element(search_buf: &[u8], data: &[u8]) -> Option<(usize, usize)> {
+fn find_repeat_element(search_buf: &[u8], data: &[u8], offset: usize) -> Option<(usize, usize)> {
     let mut coords = None;
-    let mut length = 0;
     let mut dist = 0;
+    let mut last_idx = 0;
 
     for (i, sb) in search_buf.iter().enumerate() {
-        if data[length] == *sb {
-            length += 1;
-            dist = i;
+        last_idx = i;
+
+        if data.len() <= dist {
+            break;
+        }
+
+        if i == offset + dist {
+            continue;
+        }
+
+        if data[dist] == *sb {
+            dist += 1;
         }
     }
 
-    if length != 0 && dist != 0 {
+    if dist != 0 {
+        let length = offset - last_idx + dist;
         coords = Some((length, dist));
     }
 
@@ -69,9 +79,9 @@ fn find_repeat_element(search_buf: &[u8], data: &[u8]) -> Option<(usize, usize)>
 }
 
 fn to_code(length: usize, distance: usize) -> Vec<u8> {
-    let mut ld = shortest_be_bytes(length);
+    let mut ld = short_be_bytes(length);
     ld.append(&mut ":".as_bytes().to_vec());
-    ld.append(&mut shortest_be_bytes(distance));
+    ld.append(&mut short_be_bytes(distance));
 
     ld
 }
@@ -82,17 +92,20 @@ fn find_repeat_elements(data: &[u8]) -> Vec<u8> {
     let mut current_buf = Vec::default();
 
     let mut out = Vec::default();
-    // loop overdata
-    for b in data.iter() {
+
+    for (i, b) in data.iter().enumerate() {
         // append every char into search buffer
         search_buf.push(*b);
         current_buf.push(*b);
 
         // iterate over elements in the `current buffer to compress`
-        if let Some((l, d)) = find_repeat_element(&search_buf, &current_buf) {
-            let _ = to_code(l, d);
-            //out.append(&mut to_code(l, d));
-            //current_buf.clear();
+        if let Some((l, d)) = find_repeat_element(&search_buf, &current_buf, i) {
+            // TODO: come up with a proper rules what should be compressed and what should be
+            // skipped.
+            if l > 3 && d > 3 {
+                out.append(&mut to_code(l, d));
+                current_buf.clear();
+            }
         };
     }
 
@@ -116,18 +129,18 @@ mod tests {
     }
 
     #[test]
-    fn test_find_repeat() {
+    fn test_find_first_duplicates_length_distance() {
         use crate::find_repeat_element;
 
         let data = [10, 20, 30, 40, 10, 20, 30, 40, 50];
         let buf = [10, 20, 30, 40];
-        let coords = find_repeat_element(&data, &buf);
+        let coords = find_repeat_element(&data, &buf, 4);
 
         assert_eq!(coords, Some((4, 4)));
     }
 
     #[test]
-    fn test_repeat() {
+    fn test_replace_duplicates_w_lenght_distance() {
         use super::*;
 
         let data = [10, 20, 30, 40, 10, 20, 30, 40, 50];
