@@ -51,39 +51,42 @@ fn short_be_bytes(d: usize) -> Vec<u8> {
 
 fn find_repeat_element(search_buf: &[u8], data: &[u8], offset: usize) -> Option<(usize, usize)> {
     let mut coords = None;
-    let mut dist = 0;
+    let mut length = 0;
     let mut last_idx = 0;
+    let mut is_prev_match = false;
 
+    // Start at the beginning of the data that has been read already.
     for (i, sb) in search_buf.iter().enumerate() {
+        // Increase the index to calculate the distance later.
         last_idx = i;
 
-        if data.len() <= dist {
+        // If our current buffer that we want to compress is traversed then break.
+        if data.len() <= length {
             break;
         }
 
-        if i == offset + dist {
+        // if we have a sequence of matches, increase the length of data that will be compressed.
+        if data[length] == *sb {
+            is_prev_match = true;
+            length += 1;
             continue;
         }
 
-        if data[dist] == *sb {
-            dist += 1;
+        if is_prev_match {
+            break;
         }
+
+        length = 0;
     }
 
-    if dist != 0 {
-        let length = offset - last_idx + dist;
+    // Check if we have anything to compress and if we are not looking into the search buffer
+    // further than the given offset.
+    if length != 0 && offset + length > last_idx {
+        let dist = offset + length - last_idx;
         coords = Some((length, dist));
     }
 
     coords
-}
-
-fn to_code(length: usize, distance: usize) -> Vec<u8> {
-    let mut ld = short_be_bytes(length);
-    ld.append(&mut ":".as_bytes().to_vec());
-    ld.append(&mut short_be_bytes(distance));
-
-    ld
 }
 
 fn find_repeat_elements(data: &[u8]) -> Vec<u8> {
@@ -112,39 +115,57 @@ fn find_repeat_elements(data: &[u8]) -> Vec<u8> {
     out
 }
 
+fn to_code(length: usize, distance: usize) -> Vec<u8> {
+    let mut ld = short_be_bytes(length);
+    ld.append(&mut ":".as_bytes().to_vec());
+    ld.append(&mut short_be_bytes(distance));
+
+    ld
+}
+
+#[cfg(test)]
 mod tests {
-    use crate::find_repeat_element;
+    use super::*;
 
     #[test]
     fn test_to_code() {
-        use crate::to_code;
-
         let (length, distance) = (256, 20);
         let coord = to_code(length, distance);
 
         // `256:20`.
         assert_eq!(coord, &[1, 0, 58, 20]);
-
         assert_eq!(to_code(1, 1), &[1, 58, 1]);
     }
 
     #[test]
     fn test_find_first_duplicates_length_distance() {
-        use crate::find_repeat_element;
-
         let data = [10, 20, 30, 40, 10, 20, 30, 40, 50];
         let buf = [10, 20, 30, 40];
         let coords = find_repeat_element(&data, &buf, 4);
-
         assert_eq!(coords, Some((4, 4)));
+
+        let data = [10, 20, 20, 40, 10, 20, 30, 40, 50]; // 10, 20, 30, 40
+        let buf = [10, 20, 30, 40];
+        // only first two elements from `buf` should be returned as a match.
+        let coords = find_repeat_element(&data, &buf, 9);
+        assert_eq!(coords, Some((2, 9)));
+
+        let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]; // 7, 8, 9
+        let buf = [7, 8, 9];
+        let coords = find_repeat_element(&data, &buf, 10);
+        // assuming `buf` is at the end of `data`
+        assert_eq!(coords, Some((3, 4)));
+
+        let data = [1, 2, 3, 4, 5, 6, 7, 9, 9, 10];
+        let buf = [7, 8, 9];
+        let coords = find_repeat_element(&data, &buf, 10);
+        assert_eq!(coords, Some((1, 4)));
     }
 
     #[test]
     fn test_replace_duplicates_w_lenght_distance() {
-        use super::*;
-
-        let data = [10, 20, 30, 40, 10, 20, 30, 40, 50];
-        let expected = [10, 20, 30, 40, 4, 58, 4, 50];
+        let data = [10, 20, 30, 40, 50, 10, 20, 30, 40, 60];
+        let expected = [10, 20, 30, 40, 50, 4, 58, 4, 60];
         let compressed = find_repeat_elements(&data);
 
         assert_eq!(compressed, expected);
