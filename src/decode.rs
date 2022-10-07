@@ -1,14 +1,14 @@
 use std::io::Read;
 
-type DecodeResult<T> = Result<T, String>;
+use crate::{Cartridge, DecoError, DecoResult};
 
-pub fn decode_pico_txt<R: Read>(r: R) -> DecodeResult<Vec<u8>> {
+pub fn decode_pico_txt<R: Read>(r: R) -> DecoResult<Cartridge> {
     let mut decoder = png::Decoder::new(r);
 
     let bpp = decoder.read_header_info().unwrap().bytes_per_pixel();
     // Pico8 cartridge should encode ARGB into 4 bytes per pixel.
     if bpp != 4 {
-        return Err("wrong bytes per pixel number".into());
+        return Err(DecoError::Internal);
     }
 
     let mut reader = decoder.read_info().unwrap();
@@ -19,9 +19,21 @@ pub fn decode_pico_txt<R: Read>(r: R) -> DecodeResult<Vec<u8>> {
 
     // Grab the bytes of the image.
     let bytes = &buf[..info.buffer_size()];
-    // Inspect more details of the last read frame.
 
-    Ok(bytes.to_vec())
+    let mut card_bytes = Vec::default();
+
+    // Loop over chunks of four bytes and collect 2 lsb bits from them to combine one cartridge
+    // byte.
+    for argb in bytes.chunks(bpp) {
+        let r = argb[0] & 3;
+        let g = argb[1] & 3;
+        let b = argb[2] & 3;
+        let a = argb[3] & 3;
+
+        card_bytes.push(a << 6 | r << 4 | g << 2 | b);
+    }
+
+    Cartridge::from_bytes(&card_bytes)
 }
 
 #[cfg(test)]
