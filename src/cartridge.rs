@@ -1,4 +1,7 @@
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    io::Read,
+};
 
 use crate::{DecoError, DecoResult};
 
@@ -39,6 +42,40 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
+    pub fn from_png<R: Read>(r: R) -> DecoResult<Self> {
+        let mut decoder = png::Decoder::new(r);
+
+        let bpp = decoder.read_header_info().unwrap().bytes_per_pixel();
+        // Pico8 cartridge should encode RGBA into 4 bytes per pixel.
+        if bpp != 4 {
+            return Err(DecoError::Internal);
+        }
+
+        let mut reader = decoder.read_info().unwrap();
+        // Allocate the output buffer.
+        let mut buf = vec![0; reader.output_buffer_size()];
+        // Read the next frame. An APNG might contain multiple frames.
+        let info = reader.next_frame(&mut buf).unwrap();
+
+        // Grab the bytes of the image.
+        let bytes = &buf[..info.buffer_size()];
+
+        let mut card_bytes = Vec::default();
+
+        // Loop over chunks of four bytes and collect 2 lsb bits from them to combine one cartridge
+        // byte.
+        for argb in bytes.chunks(bpp) {
+            let r = argb[0] & 3;
+            let g = argb[1] & 3;
+            let b = argb[2] & 3;
+            let a = argb[3] & 3;
+
+            card_bytes.push(a << 6 | r << 4 | g << 2 | b);
+        }
+
+        Self::from_bytes(&card_bytes)
+    }
+
     pub fn from_bytes(data: &[u8]) -> DecoResult<Self> {
         let version = match to_u32(&data[0x4300..=0x4303]) {
             V1 => Version::V1,
@@ -97,8 +134,6 @@ fn to_u32(b: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use std::vec;
-
-    use super::*;
 
     #[test]
     fn test_new_cartridge() {
