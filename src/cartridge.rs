@@ -1,16 +1,18 @@
 use std::{
     fmt::{self, Display},
     io::Read,
+    str::from_utf8,
 };
 
 use crate::{DecoError, DecoResult};
 
-const V1: u32 = u32::from_be_bytes(*b":c:\x00");
-const V2: u32 = u32::from_be_bytes(*b"\x00pxa");
+const COMPRESSION_V1: u32 = u32::from_be_bytes(*b":c:\x00");
+const COMPRESSION_V2: u32 = u32::from_be_bytes(*b"\x00pxa");
+const OLD_LOOKUP: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz!#%(){}[]<>+=/*:;.,~_";
 
-/// Cartridge encoding verion.
+/// Cartridge encoding version.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Version {
+pub enum Compression {
     V0,
     V1,
     V2,
@@ -37,7 +39,7 @@ impl Display for Lua {
 pub struct Cartridge {
     pub gfx: Gfx,
     pub lua: Lua,
-    version: Version,
+    version: Compression,
     data_len: usize,
 }
 
@@ -78,18 +80,16 @@ impl Cartridge {
 
     pub fn from_bytes(data: &[u8]) -> DecoResult<Self> {
         let version = match to_u32(&data[0x4300..=0x4303]) {
-            V1 => Version::V1,
-            V2 => Version::V2,
-            _ => Version::V0,
+            COMPRESSION_V1 => Compression::V1,
+            COMPRESSION_V2 => Compression::V2,
+            _ => Compression::V0,
         };
 
-        // let decompressed_len = to_u16(&data[0x4304..=0x4305]);
-        // let compressed_len = to_u16(&data[0x4306..=0x4307]);
-
+        let data = &data[0x4300..0x7fff];
         let lua = match version {
-            Version::V0 => get_v0_lua(&data[0x4300..0x7fff])?,
-            Version::V1 => todo!(),
-            Version::V2 => todo!(),
+            Compression::V0 => get_v0_lua(data)?,
+            Compression::V1 => get_v1_lua(data)?,
+            Compression::V2 => get_v2_lua(data)?,
         };
 
         Ok(Self {
@@ -100,7 +100,7 @@ impl Cartridge {
         })
     }
 
-    pub fn version(&self) -> Version {
+    pub fn version(&self) -> Compression {
         self.version.clone()
     }
 
@@ -122,6 +122,61 @@ fn get_v0_lua(data: &[u8]) -> DecoResult<Lua> {
         .to_string();
 
     Ok(Lua { txt })
+}
+
+fn get_v1_lua(data: &[u8]) -> DecoResult<Lua> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut cursor = 0x4308usize;
+
+    // The next two bytes (0x4304-0x4305) are the length of the decompressed code, stored MSB first.
+    // The next two bytes (0x4306-0x4307) are always zero.
+    let decompressed_len = to_u16(&data[0x4304..=0x4305]) as usize;
+
+    while cursor < decompressed_len {
+        match data[cursor] {
+            // 0x00: Copy the next byte directly to the output stream.
+            0x0 => {
+                out.push(data[cursor + 1]);
+                cursor += 2;
+            }
+
+            // 0x01-0x3b: Emit a character from a lookup table: newline, space
+            n @ 0x01..=0x3b => {
+                out.push(OLD_LOOKUP[(n - 1) as usize]);
+                cursor += 1;
+            }
+
+            // 0x3c-0xff: Calculate an offset and length from this byte and the next byte,
+            // then copy those bytes from what has already been emitted. In other words,
+            // go back "offset" characters in the output stream, copy "length" characters,
+            // then paste them to the end of the output stream.
+            n @ 0x3c..=0xff => {
+                // TODO: check if the data is in bounds.
+                let offset = cursor - ((n - 0x3c) * 16 * (data[cursor + 1] & 0xf)) as usize;
+                let length = cursor - offset + ((data[cursor + 1] >> 4) + 2) as usize;
+
+                out.append(&mut out[offset..length].to_vec());
+                cursor += 2;
+            }
+        }
+    }
+
+    Ok(Lua {
+        txt: from_utf8(&out)
+            .map_err(|_| DecoError::Internal)?
+            .to_string(),
+    })
+}
+
+fn get_v2_lua(_data: &[u8]) -> DecoResult<Lua> {
+    todo!()
+}
+
+fn to_u16(b: &[u8]) -> u16 {
+    let mut _u16: [u8; 2] = Default::default();
+    _u16.copy_from_slice(b);
+
+    u16::from_be_bytes(_u16)
 }
 
 fn to_u32(b: &[u8]) -> u32 {
@@ -148,6 +203,6 @@ mod tests {
 
         //let c = Cartridge::from_bytes(&data).unwrap();
 
-        //assert_eq!(c.version(), Version::V2);
+        //assert_eq!(c.version(), Compression::V2);
     }
 }
