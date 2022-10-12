@@ -168,7 +168,34 @@ fn get_v1_lua(data: &[u8]) -> DecoResult<Lua> {
     })
 }
 
-fn get_v2_lua(_data: &[u8]) -> DecoResult<Lua> {
+fn get_v2_lua(data: &[u8]) -> DecoResult<Lua> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut data_cursor = 0x4308usize;
+
+    // Initially, each of the 256 possible bytes maps to itself.
+    let mut mtf = &data[data_cursor..data_cursor + 256];
+    data_cursor += 256;
+
+    // The next two bytes (0x4304-0x4305) are the length of the decompressed code, stored MSB first.
+    let decompressed_len = to_u16(&data[0x4304..=0x4305]) as usize;
+    // The next two bytes (0x4306-0x4307) are the length of the compressed data + 8 for this 8-byte header, stored MSB first.
+    let compressed_len = to_u16(&data[0x4306..=0x4307]) as usize;
+
+    while data_cursor < compressed_len {
+        let mut unary = 0;
+        for i in 0..8 {
+            if bit_from_byte(data[data_cursor], i) {
+                unary += 1;
+            }
+        }
+
+        data_cursor += 1
+    }
+
+    todo!()
+}
+
+fn bit_from_byte(byte: u8, bit_idx: usize) -> bool {
     todo!()
 }
 
