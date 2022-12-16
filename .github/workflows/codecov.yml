@@ -33,3 +33,4 @@ jobs:
         with:
           directory: /tmp/cov/
           name: deco8-codecov
+          fail_ci_if_error: true
