@@ -12,3 +12,4 @@
 [codecov-url]: https://codecov.io/github/bacv/deco8
 
 An alternative editor for pico8 cartridges
+This text won't get merged
